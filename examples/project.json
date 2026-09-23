@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "id": "custom-my-rag",
+  "name": "My RAG assistant",
+  "description": "Ask questions across my documents.",
+  "prompts": ["What information is available in this knowledge base?"],
+  "connection": {
+    "endpoint": "http://127.0.0.1:8000/chat",
+    "protocol": "json",
+    "requestMode": "question",
+    "questionField": "question",
+    "answerPath": "answer",
+    "sourcesPath": "sources",
+    "includeHistory": false,
+    "model": ""
+  }
+}
