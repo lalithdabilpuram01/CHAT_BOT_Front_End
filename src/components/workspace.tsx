@@ -101,7 +101,9 @@ export function Workspace() {
         if (new Set(loaded.map((p) => p.id)).size !== loaded.length)
           throw new Error("Duplicate project IDs.");
         setProfiles(loaded);
-        if (loaded[0]) setProjectId(loaded[0].id);
+        setProjectId(loaded[0]?.id ?? demoProjects[0].id);
+      } else {
+        setSetup({});
       }
     } catch {
       setNotice(

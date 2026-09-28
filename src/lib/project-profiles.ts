@@ -1,3 +1,4 @@
+import { backendEndpoint, DEFAULT_BACKEND_URL } from "./backend-url";
 import type {
   ChatRequest,
   ConnectionConfig,
@@ -17,6 +18,24 @@ export const defaultConnection: ConnectionConfig = {
   model: "",
 };
 const forbidden = new Set(["__proto__", "constructor", "prototype"]);
+
+export const queryConnection: ConnectionConfig = {
+  ...defaultConnection,
+  endpoint: "/api/rag",
+  backendUrl: DEFAULT_BACKEND_URL,
+  queryPath: "/query",
+  questionField: "q",
+  conversationIdField: "thread_id",
+};
+
+export const defaultProfile: ProjectProfile = {
+  version: 1,
+  id: "custom-rag-backend",
+  name: "My RAG assistant",
+  description: "Ask questions using your connected RAG backend.",
+  prompts: ["What information can you help me find?"],
+  connection: queryConnection,
+};
 
 export function validateEndpoint(endpoint: string) {
   if (
@@ -105,7 +124,25 @@ export function parseProfile(value: unknown): ProjectProfile {
       throw new Error(`Invalid ${key} setting.`);
   if (typeof c.includeHistory !== "boolean")
     throw new Error("includeHistory must be true or false.");
+  if (
+    c.conversationIdField !== undefined &&
+    (typeof c.conversationIdField !== "string" ||
+      (c.conversationIdField !== "" &&
+        (!/^[a-zA-Z_][a-zA-Z0-9_]{0,79}$/.test(c.conversationIdField) ||
+          forbidden.has(c.conversationIdField) ||
+          ["history", "model", "messages", "stream", c.questionField].includes(
+            c.conversationIdField,
+          ))))
+  )
+    throw new Error(
+      "Use a unique conversation field, such as thread_id or session_id, or leave it blank.",
+    );
   validateEndpoint(c.endpoint as string);
+  if (c.backendUrl !== undefined || c.queryPath !== undefined) {
+    if (typeof c.backendUrl !== "string" || typeof c.queryPath !== "string")
+      throw new Error("Enter the backend server URL and question path.");
+    backendEndpoint(c.backendUrl, c.queryPath);
+  }
   if (
     !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(c.questionField as string) ||
     forbidden.has(c.questionField as string) ||
@@ -136,9 +173,18 @@ export function parseProfile(value: unknown): ProjectProfile {
     prompts: p.prompts as string[],
     connection: {
       endpoint: c.endpoint as string,
+      ...(c.backendUrl !== undefined
+        ? {
+            backendUrl: (c.backendUrl as string).trim().replace(/\/+$/, ""),
+            queryPath: (c.queryPath as string).trim(),
+          }
+        : {}),
       protocol: c.protocol as ConnectionConfig["protocol"],
       requestMode: c.requestMode as ConnectionConfig["requestMode"],
       questionField: c.questionField as string,
+      ...(c.conversationIdField !== undefined
+        ? { conversationIdField: c.conversationIdField as string }
+        : {}),
       answerPath: c.answerPath as string,
       sourcesPath: c.sourcesPath as string,
       model: c.model as string,
@@ -166,8 +212,12 @@ export function buildRequestBody(
   request: ChatRequest,
 ) {
   if (config.requestMode === "folio") return request;
+  const conversation = config.conversationIdField
+    ? { [config.conversationIdField]: request.conversationId }
+    : {};
   if (config.requestMode === "messages")
     return {
+      ...conversation,
       messages: request.messages,
       stream: false,
       ...(config.model ? { model: config.model } : {}),
@@ -175,9 +225,40 @@ export function buildRequestBody(
   const question =
     request.messages.filter((m) => m.role === "user").at(-1)?.content ?? "";
   return {
+    ...conversation,
     [config.questionField]: question,
     ...(config.includeHistory
       ? { history: request.messages.slice(0, -1) }
       : {}),
+  };
+}
+
+// Existing saved profiles keep working; the settings editor makes their destination visible.
+export function editableConnection(config: ConnectionConfig): ConnectionConfig {
+  if (config.backendUrl !== undefined) return config;
+  if (config.endpoint === "/api/rag")
+    return { ...config, backendUrl: DEFAULT_BACKEND_URL, queryPath: "/query" };
+  if (/^https?:\/\//.test(config.endpoint)) {
+    const url = new URL(config.endpoint);
+    return { ...config, backendUrl: url.origin, queryPath: url.pathname };
+  }
+  return config;
+}
+
+export function projectTransport(
+  config: ConnectionConfig,
+  request: ChatRequest,
+) {
+  const payload = buildRequestBody(config, request);
+  if (config.backendUrl === undefined)
+    return { endpoint: config.endpoint, body: payload };
+  backendEndpoint(config.backendUrl, config.queryPath ?? "/query");
+  return {
+    endpoint: "/api/connect",
+    body: {
+      backendUrl: config.backendUrl,
+      queryPath: config.queryPath ?? "/query",
+      payload,
+    },
   };
 }

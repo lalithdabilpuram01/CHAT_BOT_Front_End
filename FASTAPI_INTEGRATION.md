@@ -1,6 +1,34 @@
 # FastAPI integration contract
 
-This is the proposed boundary, not a claim that the current app is connected. The visible app uses sample data. The HTTP adapter exists and is tested, but no `/api/chat` route or authentication provider has been configured.
+Project settings contain `backendUrl` and `queryPath`, plus the request/response
+mappings. The browser calls the implemented `/api/connect` route with:
+
+```json
+{
+  "backendUrl": "https://my-rag.example.com",
+  "queryPath": "/query",
+  "payload": { "q": "Hello", "thread_id": "conversation-uuid" }
+}
+```
+
+The route sends only `payload` to the combined backend URL. JSON and NDJSON
+responses pass through to the existing adapters. URLs with credentials, query
+parameters, or fragments are rejected. Requests are limited to 1 MB and 120 seconds.
+Every resolved address must be public, the connection is pinned to a checked IP,
+and redirects are rejected. No browser cookies or server API keys are forwarded.
+
+The default Cloud Run project uses `q`, `thread_id`, `answer`, and `sources`.
+Raw source strings display as retrieved passages. New connections, including
+switching destinations, are configured entirely through the UI without a restart.
+New conversations and connection tests get distinct IDs; follow-ups reuse the ID.
+
+The old `/api/rag` route and its `BACKEND_URL`, `BACKEND_QUERY_PATH`, and optional
+`BACKEND_API_KEY` remain for legacy profiles. Those credentials belong only to that
+fixed destination and are never available to the dynamic connector.
+
+Neither route implements user authentication. Add access control and per-user
+rate limits for a shared deployment. The topology below describes the streaming
+contract and authorization responsibilities for a production gateway.
 
 ## Recommended topology
 
