@@ -2,26 +2,47 @@
 
 You do not need to edit React components to connect a compatible API.
 
-1. Start your RAG backend and Folio (`npm run dev`).
-2. In the left sidebar, choose **Add project**. On mobile, open the navigation menu first.
-3. Name your project and enter its chat endpoint, for example `http://127.0.0.1:8000/chat`.
-4. Choose **JSON**, set the question field your API accepts, and set the field path containing its answer.
-5. Click **Send test question** to make one real API request and inspect the result.
-6. **Save project**. Select it from the project switcher and start chatting.
+For your Cloud Run backend, use:
+
+| Setting            | Value                                               |
+| ------------------ | --------------------------------------------------- |
+| Backend server URL | `https://rag-api-851836889082.us-central1.run.app/` |
+| Question path      | `/query`                                            |
+| Preset             | RAG query — q + thread_id                           |
+| Response format    | JSON                                                |
+| Answer field       | `answer`                                            |
+| Sources field      | `sources`                                           |
+
+To connect anyone else's backend:
+
+1. Choose **Add project** and name it.
+2. Paste their **Backend server URL**.
+3. Set its **Question path** (usually `/query` or `/chat`).
+4. Choose a preset or map the request and answer fields to match their API.
+5. Click **Send test question** to verify it.
+6. **Save project** and start chatting.
+
+Folio joins the server URL and question path and handles the connection. For
+example, `https://other-rag.example.com/` plus `/query` becomes
+`https://other-rag.example.com/query`. No environment-file changes or restart are
+needed. Different projects can use different servers at the same time.
 
 Settings are saved in this browser. Conversations remain session-only. Editing a connection clears its current session conversations to avoid sending previous context to a different backend.
 
 ## Common configurations
 
-| Your backend | Request settings | Answer path |
-| --- | --- | --- |
-| Accepts `{"question":"…"}`, returns `{"answer":"…"}` | Question field: `question` | `answer` |
-| Accepts `{"query":"…"}`, returns `{"result":"…"}` | Question field: `query` | `result` |
-| Accepts `{"input":"…"}`, returns `{"data":{"answer":"…"}}` | Question field: `input` | `data.answer` |
-| Accepts a chat `messages` array and returns choices | Messages array; supply model if required | `choices.0.message.content` |
-| Streams Folio JSON events | NDJSON; choose the request shape your API accepts | Not required |
+| Your backend                                                  | Request settings                                        | Answer path                 |
+| ------------------------------------------------------------- | ------------------------------------------------------- | --------------------------- |
+| Accepts `{"q":"…","thread_id":"…"}`, returns `{"answer":"…"}` | Question field: `q`; conversation ID field: `thread_id` | `answer`                    |
+| Accepts `{"question":"…"}`, returns `{"answer":"…"}`          | Question field: `question`                              | `answer`                    |
+| Accepts `{"query":"…"}`, returns `{"result":"…"}`             | Question field: `query`                                 | `result`                    |
+| Accepts `{"input":"…"}`, returns `{"data":{"answer":"…"}}`    | Question field: `input`                                 | `data.answer`               |
+| Accepts a chat `messages` array and returns choices           | Messages array; supply model if required                | `choices.0.message.content` |
+| Streams Folio JSON events                                     | NDJSON; choose the request shape your API accepts       | Not required                |
 
 The messages preset requests `stream: false`. For streaming use the documented NDJSON contract. SSE and other custom formats require a transport adapter; there is no universal RAG wire protocol.
+
+Set **Conversation ID field** when the backend maintains memory by thread/session ID. Follow-ups reuse the ID; new conversations and connection tests get distinct UUIDs. Leave this field blank for stateless backends.
 
 Enable **Include previous messages** only if your question-style endpoint accepts a `history` array. The request preview shows exactly what will be sent. The Folio envelope preset sends projectId, conversationId, documentIds, and messages. Its projectId is the profile's local ID; if your service uses its own identifiers, map them at your gateway or custom adapter.
 
@@ -33,10 +54,12 @@ Set the optional sources field path to `sources`, `data.documents`, or the corre
 {
   "answer": "Your RAG response",
   "sources": [
-    {"title": "My document", "excerpt": "The supporting passage", "page": 4}
+    { "title": "My document", "excerpt": "The supporting passage", "page": 4 }
   ]
 }
 ```
+
+Sources can also be raw passage strings, as returned by the Cloud Run backend. These display as **Retrieved passage 1**, **Retrieved passage 2**, etc., with the original text and no invented document title or page.
 
 Source objects can use `title` or `source`/`metadata.source`, and `excerpt`, `content`, or `page_content`. Page references are optional and should be one-based. Missing page references are never invented. IDs, kind, and updated date are optional for JSON responses. Other source schemas need normalization at your backend or adapter.
 
@@ -63,6 +86,15 @@ For a connection-only demo, run `python3 -m uvicorn examples.demo_backend:app --
 
 ## Authentication and deployment
 
-Direct browser connections require CORS for the exact frontend origin. Both localhost and 127.0.0.1 defaults are allowed by the sample bridge; add your actual development origin if using another port. An HTTPS frontend cannot normally call an HTTP backend due to mixed-content restrictions.
+New profiles connect through Folio's `/api/connect` server route, so backend CORS
+changes are unnecessary. The server must be publicly reachable. Private network,
+localhost, and cloud metadata addresses are blocked; redirects are not followed.
+DNS is checked and the outgoing connection uses the checked IP address.
 
-For production, use an authenticated same-origin endpoint such as `/api/chat`; same-origin session cookies are sent automatically. Cross-origin credentials and provider API keys are intentionally not stored in browser profiles. The supplied Python bridge is for local development and does not implement authentication. Internal/customer access, tenant isolation, and source permissions must remain enforced by your backend.
+The route does not send browser cookies or environment API keys to user-selected
+servers. Services requiring authentication need an authenticated gateway or a
+custom adapter. Folio itself does not yet provide user login or shared-service
+rate limits; deploy behind access control when sharing it.
+
+Old direct/same-origin profiles and the environment-configured `/api/rag` route
+remain supported. Their old CORS and authentication requirements still apply.

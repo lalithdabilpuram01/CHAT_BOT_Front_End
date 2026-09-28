@@ -20,9 +20,12 @@ export type Project = {
 };
 export type ConnectionConfig = {
   endpoint: string;
+  backendUrl?: string;
+  queryPath?: string;
   protocol: "json" | "ndjson";
   requestMode: "question" | "messages" | "folio";
   questionField: string;
+  conversationIdField?: string;
   answerPath: string;
   sourcesPath: string;
   includeHistory: boolean;

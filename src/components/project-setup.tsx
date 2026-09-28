@@ -6,6 +6,8 @@ import {
   buildRequestBody,
   defaultConnection,
   parseProfile,
+  queryConnection,
+  editableConnection,
 } from "@/lib/project-profiles";
 import { createProjectAdapter } from "@/lib/project-adapter";
 import type { ConnectionConfig, ProjectProfile } from "@/lib/types";
@@ -21,16 +23,17 @@ export function ProjectSetup({
   onRemove: (id: string) => void;
   onClose: () => void;
 }) {
-  const [profile, setProfile] = useState<ProjectProfile>(
-    () =>
-      initial ?? {
-        version: 1,
-        id: `custom-${crypto.randomUUID()}`,
-        name: "",
-        description: "Ask questions across your own knowledge base.",
-        prompts: [],
-        connection: { ...defaultConnection },
-      },
+  const [profile, setProfile] = useState<ProjectProfile>(() =>
+    initial
+      ? { ...initial, connection: editableConnection(initial.connection) }
+      : {
+          version: 1,
+          id: `custom-${crypto.randomUUID()}`,
+          name: "",
+          description: "Ask questions across your own knowledge base.",
+          prompts: [],
+          connection: { ...queryConnection, backendUrl: "" },
+        },
   );
   const [prompts, setPrompts] = useState(initial?.prompts.join("\n") ?? "");
   const [importText, setImportText] = useState("");
@@ -63,7 +66,7 @@ export function ProjectSetup({
   }
   const request = {
     projectId: profile.id,
-    conversationId: "connection-test",
+    conversationId: "preview-conversation-id",
     documentIds: [],
     messages: [{ role: "user" as const, content: question }],
   };
@@ -85,8 +88,8 @@ export function ProjectSetup({
     let count = 0;
     try {
       for await (const event of createProjectAdapter(current.connection).stream(
-        request,
-        AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]),
+        { ...request, conversationId: crypto.randomUUID() },
+        AbortSignal.any([abort.signal, AbortSignal.timeout(120_000)]),
       )) {
         if (event.type === "delta") answer += event.text;
         if (event.type === "sources") count = event.sources.length;
@@ -102,7 +105,7 @@ export function ProjectSetup({
       if (!abort.signal.aborted)
         setError(
           (e as Error).name === "TimeoutError"
-            ? "The test timed out after 30 seconds. Your project can still be saved; chat requests allow two minutes."
+            ? "The test timed out after two minutes. Check your backend and try again."
             : (e as Error).message,
         );
     } finally {
@@ -148,8 +151,8 @@ export function ProjectSetup({
         </button>
       </div>
       <p>
-        Keep your backend. Bring it into Folio with a reusable connection
-        profile.
+        Enter your backend server address, choose its settings, and start
+        chatting.
       </p>
       <form
         onSubmit={(e) => {
@@ -162,6 +165,33 @@ export function ProjectSetup({
         }}
       >
         <fieldset disabled={testing}>
+          <label>
+            Connection preset
+            <select
+              value=""
+              onChange={(e) =>
+                config({
+                  ...(e.target.value === "query"
+                    ? queryConnection
+                    : {
+                        ...defaultConnection,
+                        conversationIdField: "",
+                        queryPath: "/chat",
+                      }),
+                  backendUrl: connection.backendUrl ?? "",
+                  endpoint: "/api/rag",
+                })
+              }
+            >
+              <option value="" disabled>
+                Choose a preset to fill connection fields
+              </option>
+              <option value="query">RAG query — q + thread_id</option>
+              <option value="generic">
+                Custom backend — question + answer
+              </option>
+            </select>
+          </label>
           <div className="setup-grid">
             <label>
               Project name
@@ -194,18 +224,32 @@ export function ProjectSetup({
             </label>
           </div>
           <label>
-            Chat API endpoint
+            Backend server URL
             <input
               required
-              value={connection.endpoint}
-              placeholder="http://127.0.0.1:8000/chat"
-              onChange={(e) => config({ endpoint: e.target.value.trim() })}
+              value={connection.backendUrl ?? ""}
+              placeholder="https://my-rag-server.example.com"
+              onChange={(e) =>
+                config({
+                  backendUrl: e.target.value.trim(),
+                  queryPath: connection.queryPath ?? "/query",
+                })
+              }
+            />
+          </label>
+          <label>
+            Question path
+            <input
+              required
+              value={connection.queryPath ?? "/query"}
+              placeholder="/query"
+              onChange={(e) => config({ queryPath: e.target.value.trim() })}
             />
           </label>
           <p className="field-hint">
-            Requests go directly to this URL. A different origin must allow this
-            frontend through CORS. Use a same-origin gateway for authenticated
-            customer deployments.
+            Paste your server address above. The question path is usually /query
+            or /chat. Folio handles the connection; save a different server for
+            each project.
           </p>
           <div className="setup-grid">
             <label>
@@ -270,6 +314,22 @@ export function ProjectSetup({
               </>
             )}
           </div>
+          {connection.requestMode !== "folio" && (
+            <label>
+              Conversation ID field (optional)
+              <input
+                value={connection.conversationIdField ?? ""}
+                placeholder="thread_id or session_id"
+                onChange={(e) =>
+                  config({ conversationIdField: e.target.value })
+                }
+              />
+              <span className="field-hint">
+                Reuses the same ID for follow-ups. New conversations get a new
+                ID.
+              </span>
+            </label>
+          )}
           {connection.requestMode === "question" && (
             <label className="setup-checkbox">
               <input
@@ -337,7 +397,11 @@ export function ProjectSetup({
                   if (importText.length > 20_000)
                     throw new Error("Settings must be smaller than 20 KB.");
                   const loaded = parseProfile(JSON.parse(importText));
-                  setProfile({ ...loaded, id: initial?.id ?? profile.id });
+                  setProfile({
+                    ...loaded,
+                    connection: editableConnection(loaded.connection),
+                    id: initial?.id ?? profile.id,
+                  });
                   setPrompts(loaded.prompts.join("\n"));
                   setError("");
                   setTestResult("");
